@@ -2,7 +2,7 @@
 
 > Remote development services that still feel like `localhost`.
 
-![OmaTunnel panel preview](preview.png)
+![OmaTunnel panel preview](preview-v2.png)
 
 OmaTunnel is an Omarchy Quickshell bar widget and SSH-forward manager. It
 makes selected development-server ports available through `localhost`, without
