@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "jvb.omatunnel",
+  "name": "OmaTunnel",
+  "version": "0.1.0",
+  "author": "Jeroen van Baarsen",
+  "description": "Expose configured development services over safe, local-only SSH forwards.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "OmaTunnel",
+    "description": "Shows configured localhost development-service tunnels.",
+    "category": "Network",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "schema": []
+  }
+}

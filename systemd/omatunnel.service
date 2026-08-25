@@ -1,0 +1,14 @@
+[Unit]
+Description=OmaTunnel localhost SSH forward manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/omatunnel watch
+ExecStop=%h/.local/bin/omatunnel stop
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

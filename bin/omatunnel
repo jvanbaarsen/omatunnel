@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# OmaTunnel owns only its own SSH children and only binds 127.0.0.1. A mapping
+# is eligible for a forward only when no other local listener owns its port.
+
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omatunnel"
+config_file="$config_dir/ports.tsv"
+runtime_dir="${XDG_RUNTIME_DIR:-/tmp}/omatunnel-${UID}"
+poll_interval="${OMATUNNEL_POLL_INTERVAL:-3}"
+
+mkdir -p "$runtime_dir"
+chmod 700 "$runtime_dir"
+
+die() { printf '%s\n' "$*" >&2; exit 1; }
+
+valid_port() { [[ "$1" =~ ^[1-9][0-9]{0,4}$ ]] && (( $1 <= 65535 )); }
+valid_token() { [[ "$1" =~ ^[A-Za-z0-9._:@-]+$ ]]; }
+valid_port_list() {
+  local item first last
+  [[ "$1" =~ ^[0-9,-]+$ ]] || return 1
+  IFS=',' read -ra items <<< "$1"
+  for item in "${items[@]}"; do
+    IFS='-' read -r first last <<< "$item"
+    valid_port "$first" || return 1
+    [[ -z "${last:-}" ]] || { valid_port "$last" && (( first <= last )); } || return 1
+  done
+}
+
+port_has_listener() {
+  ss -H -ltn "sport = :$1" 2>/dev/null | grep -q .
+}
+
+pid_is_our_tunnel() {
+  local port="$1" pidfile="$runtime_dir/$1.pid" pid args
+  [[ -f "$pidfile" ]] || return 1
+  pid="$(<"$pidfile")"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null || return 1
+  args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+  [[ "$args" == *ssh* && "$args" == *"-L 127.0.0.1:${port}:"* ]]
+}
+
+stop_tunnel() {
+  local port="$1" pidfile="$runtime_dir/$1.pid"
+  if pid_is_our_tunnel "$port"; then kill "$(<"$pidfile")" 2>/dev/null || true; fi
+  rm -f "$pidfile" "$runtime_dir/$port.log"
+}
+
+remote_port_is_open() {
+  local destination="$1" remote_host="$2" remote_port="$3"
+  ssh -n \
+    -o BatchMode=yes \
+    -o ConnectTimeout=3 \
+    -o ConnectionAttempts=1 \
+    "$destination" \
+    "timeout 3 bash -c '</dev/tcp/$remote_host/$remote_port'" \
+    >/dev/null 2>&1
+}
+
+start_tunnel() {
+  local local_port="$1" destination="$2" remote_host="$3" remote_port="$4" pidfile="$runtime_dir/$1.pid"
+  nohup ssh -N \
+    -o BatchMode=yes \
+    -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=20 \
+    -o ServerAliveCountMax=2 \
+    -L "127.0.0.1:${local_port}:${remote_host}:${remote_port}" \
+    "$destination" \
+    >"$runtime_dir/$local_port.log" 2>&1 &
+  printf '%s\n' "$!" > "$pidfile"
+  sleep 0.1
+  pid_is_our_tunnel "$local_port"
+}
+
+declare -a local_ports=() destinations=() remote_hosts=() remote_ports=()
+declare -A configured_ports=()
+
+load_mappings() {
+  local local_port destination remote_host remote_port extra line_number=0
+  local_ports=()
+  destinations=()
+  remote_hosts=()
+  remote_ports=()
+  configured_ports=()
+  [[ -f "$config_file" ]] || return 0
+  while IFS=$'\t' read -r local_port destination remote_host remote_port extra || [[ -n "${local_port:-}" ]]; do
+    line_number=$((line_number + 1))
+    [[ -z "${local_port:-}" || "$local_port" =~ ^# ]] && continue
+    [[ -z "${destination:-}" || -z "${remote_host:-}" || -z "${remote_port:-}" || -n "${extra:-}" ]] && die "$config_file:$line_number must have four tab-separated columns"
+    valid_port "$local_port" && valid_port "$remote_port" && valid_token "$destination" && valid_token "$remote_host" || die "$config_file:$line_number contains an invalid mapping"
+    [[ -z "${configured_ports[$local_port]:-}" ]] || die "$config_file:$line_number repeats local port $local_port"
+    configured_ports[$local_port]=1
+    local_ports+=("$local_port"); destinations+=("$destination"); remote_hosts+=("$remote_host"); remote_ports+=("$remote_port")
+  done < "$config_file"
+}
+
+save_mapping() {
+  local local_port="$1" destination="$2" remote_host="$3" remote_port="$4" temporary_file
+  valid_port "$local_port" && valid_port "$remote_port" && valid_token "$destination" && valid_token "$remote_host" || die "invalid mapping"
+  stop_tunnel "$local_port"
+  mkdir -p "$config_dir"
+  chmod 700 "$config_dir"
+  temporary_file="$(mktemp "$config_file.XXXXXX")"
+  if [[ -f "$config_file" ]]; then
+    awk -F $'\t' -v local_port="$local_port" '$1 != local_port { print }' "$config_file" > "$temporary_file"
+  fi
+  printf '%s\t%s\t%s\t%s\n' "$local_port" "$destination" "$remote_host" "$remote_port" >> "$temporary_file"
+  chmod 600 "$temporary_file"
+  mv "$temporary_file" "$config_file"
+}
+
+remove_mapping() {
+  local local_port="$1" temporary_file
+  valid_port "$local_port" || die "invalid port"
+  stop_tunnel "$local_port"
+  [[ -f "$config_file" ]] || return 0
+  temporary_file="$(mktemp "$config_file.XXXXXX")"
+  awk -F $'\t' -v local_port="$local_port" '$1 != local_port { print }' "$config_file" > "$temporary_file"
+  chmod 600 "$temporary_file"
+  mv "$temporary_file" "$config_file"
+}
+
+on_demand_config_file="$config_dir/on-demand.conf"
+
+save_on_demand() {
+  local destination="$1" remote_host="$2" ports="$3" temporary_file
+  valid_token "$destination" && valid_token "$remote_host" && valid_port_list "$ports" || die "invalid Default destination or allowed ports"
+  mkdir -p "$config_dir"
+  chmod 700 "$config_dir"
+  temporary_file="$(mktemp "$on_demand_config_file.XXXXXX")"
+  printf 'ssh_destination=%s\nremote_host=%s\nports=%s\nproxy_port=46173\n' "$destination" "$remote_host" "$ports" > "$temporary_file"
+  chmod 600 "$temporary_file"
+  mv "$temporary_file" "$on_demand_config_file"
+}
+
+on_demand_status_json() {
+  local destination="" remote_host="127.0.0.1" ports="" proxy_port="46173" automatic='[]' key value
+  if [[ -f "$on_demand_config_file" ]]; then
+    while IFS='=' read -r key value || [[ -n "${key:-}" ]]; do
+      case "$key" in
+        ssh_destination) destination="$value" ;;
+        remote_host) remote_host="$value" ;;
+        ports) ports="$value" ;;
+        proxy_port) proxy_port="$value" ;;
+      esac
+    done < "$on_demand_config_file"
+  fi
+  valid_port "$proxy_port" || proxy_port=46173
+  if [[ -r "$config_dir/on-demand-status.json" ]]; then automatic="$(<"$config_dir/on-demand-status.json")"; fi
+  printf '{"ssh_destination":"%s","remote_host":"%s","ports":"%s","proxy_port":%s,"automatic":%s}\n' \
+    "$(printf '%s' "$destination" | json_escape)" "$(printf '%s' "$remote_host" | json_escape)" "$(printf '%s' "$ports" | json_escape)" "$proxy_port" "$automatic"
+}
+
+state_for() {
+  local index="$1" port="${local_ports[$1]}" pidfile="$runtime_dir/${local_ports[$1]}.pid"
+  if pid_is_our_tunnel "$port"; then
+    if port_has_listener "$port"; then printf 'tunnel'; return; fi
+    rm -f "$pidfile"
+  fi
+  if port_has_listener "$port"; then printf 'local'; return; fi
+  if remote_port_is_open "${destinations[$index]}" "${remote_hosts[$index]}" "${remote_ports[$index]}"; then printf 'ready'; else printf 'unavailable'; fi
+}
+
+reconcile() {
+  local index port state
+  for index in "${!local_ports[@]}"; do
+    port="${local_ports[$index]}"
+    state="$(state_for "$index")"
+    case "$state" in
+      ready) start_tunnel "$port" "${destinations[$index]}" "${remote_hosts[$index]}" "${remote_ports[$index]}" || stop_tunnel "$port" ;;
+      local|unavailable) stop_tunnel "$port" ;;
+    esac
+  done
+}
+
+json_escape() { sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+status_json() {
+  local index state comma=""
+  printf '{"tunnels":['
+  for index in "${!local_ports[@]}"; do
+    state="$(state_for "$index")"
+    [[ "$state" == ready ]] && state="unavailable"
+    printf '%s{"local_port":%s,"ssh_destination":"%s","remote_host":"%s","remote_port":%s,"state":"%s"}' \
+      "$comma" "${local_ports[$index]}" "${destinations[$index]}" "${remote_hosts[$index]}" "${remote_ports[$index]}" "$state"
+    comma=','
+  done
+  printf ']}\n'
+}
+
+command="${1:-}"
+case "$command" in
+  reconcile) load_mappings; reconcile ;;
+  status) load_mappings; [[ "${2:-}" == "--json" ]] || die "usage: omatunnel status --json"; status_json ;;
+  watch) load_mappings; while true; do reconcile; sleep "$poll_interval"; load_mappings; done ;;
+  stop) load_mappings; if [[ -n "${2:-}" ]]; then valid_port "$2" || die "invalid port"; stop_tunnel "$2"; else for port in "${local_ports[@]}"; do stop_tunnel "$port"; done; fi ;;
+  set) [[ $# == 5 ]] || die "usage: omatunnel set <local-port> <ssh-destination> <remote-host> <remote-port>"; save_mapping "$2" "$3" "$4" "$5" ;;
+  remove) [[ $# == 2 ]] || die "usage: omatunnel remove <local-port>"; remove_mapping "$2" ;;
+  on-demand)
+    case "${2:-}" in
+      set) [[ $# == 5 ]] || die "usage: omatunnel on-demand set <default-host-or-ip> <remote-host> <ports>"; save_on_demand "$3" "$4" "$5" ;;
+      status) [[ "${3:-}" == "--json" ]] || die "usage: omatunnel on-demand status --json"; on_demand_status_json ;;
+      *) die "usage: omatunnel on-demand {set <default-host-or-ip> <remote-host> <ports>|status --json}" ;;
+    esac
+    ;;
+  *) die "usage: omatunnel {reconcile|status --json|watch|stop [port]|set|remove}" ;;
+esac
