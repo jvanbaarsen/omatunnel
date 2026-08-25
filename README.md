@@ -42,7 +42,7 @@ OmaTunnel owns for that local port.
 Install the bar widget from its public repository:
 
 ```bash
-omarchy plugin add https://github.com/<owner>/omatunnel.git --enable
+omarchy plugin add https://github.com/jvanbaarsen/omatunnel.git --enable
 ```
 
 The widget requires the accompanying helper and user service. Run its installer
