@@ -1,0 +1,18 @@
+[Unit]
+Description=OmaTunnel system-wide on-demand forwarding for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+Environment=OMATUNNEL_STATUS_FILE=/home/%i/.config/omatunnel/on-demand-status.json
+CapabilityBoundingSet=CAP_BPF CAP_NET_ADMIN CAP_PERFMON
+AmbientCapabilities=CAP_BPF CAP_NET_ADMIN CAP_PERFMON
+NoNewPrivileges=yes
+ExecStart=/usr/local/lib/omatunnel/omatunnel-ebpf --serve /usr/local/lib/omatunnel/omatunnel-connect.bpf.o /home/%i/.config/omatunnel/on-demand.conf
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

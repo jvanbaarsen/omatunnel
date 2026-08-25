@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+source_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omatunnel"
+plugin_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/jvb.omatunnel"
+bin_dir="$HOME/.local/bin"
+unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+enable_on_demand="${1:-}"
+
+[[ -z "$enable_on_demand" || "$enable_on_demand" == "--on-demand" ]] || { echo "usage: ./install [--on-demand]" >&2; exit 1; }
+
+install -Dm755 "$source_dir/bin/omatunnel" "$bin_dir/omatunnel"
+install -Dm644 "$source_dir/systemd/omatunnel.service" "$unit_dir/omatunnel.service"
+mkdir -p "$config_dir"
+if [[ ! -e "$config_dir/ports.tsv" ]]; then install -Dm600 "$source_dir/examples/ports.tsv" "$config_dir/ports.tsv"; fi
+if [[ ! -e "$config_dir/on-demand.conf" ]]; then install -Dm600 "$source_dir/examples/on-demand.conf" "$config_dir/on-demand.conf"; fi
+ln -sfn "$source_dir/plugin" "$plugin_dir"
+
+systemctl --user daemon-reload
+systemctl --user enable --now omatunnel.service
+if [[ "$enable_on_demand" == "--on-demand" ]]; then
+  make -C "$source_dir" ebpf-check
+  sudo install -Dm755 "$source_dir/ebpf/omatunnel-ebpf" /usr/local/lib/omatunnel/omatunnel-ebpf
+  sudo install -Dm644 "$source_dir/ebpf/omatunnel-connect.bpf.o" /usr/local/lib/omatunnel/omatunnel-connect.bpf.o
+  sudo install -Dm644 "$source_dir/systemd/omatunnel-ebpf@.service" /etc/systemd/system/omatunnel-ebpf@.service
+  sudo install -Dm644 "$source_dir/systemd/omatunnel-ebpf-reload@.service" /etc/systemd/system/omatunnel-ebpf-reload@.service
+  sudo install -Dm644 "$source_dir/systemd/omatunnel-ebpf-reload@.path" /etc/systemd/system/omatunnel-ebpf-reload@.path
+  sudo systemctl daemon-reload
+  sudo systemctl enable "omatunnel-ebpf-reload@${USER}.path"
+  sudo systemctl restart "omatunnel-ebpf-reload@${USER}.path"
+  sudo systemctl enable "omatunnel-ebpf@${USER}.service"
+  sudo systemctl reset-failed "omatunnel-ebpf@${USER}.service"
+  sudo systemctl restart "omatunnel-ebpf@${USER}.service"
+fi
+omarchy restart shell
+omarchy-shell shell rescanPlugins
+omarchy plugin enable jvb.omatunnel --section right
+
+printf 'Installed OmaTunnel in the top-right bar. Edit %s, then run: omatunnel reconcile\n' "$config_dir/ports.tsv"
+if [[ "$enable_on_demand" != "--on-demand" ]]; then
+  printf 'For all-localhost on-demand forwarding, edit %s then rerun: ./install --on-demand\n' "$config_dir/on-demand.conf"
+fi

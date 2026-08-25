@@ -1,0 +1,6 @@
+[Unit]
+Description=Reload OmaTunnel on-demand forwarding for %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl try-restart omatunnel-ebpf@%i.service
