@@ -1,8 +1,32 @@
 # OmaTunnel
 
-OmaTunnel is an Omarchy QuickShell bar plugin plus a user-level service. It
-makes selected development-server ports available on this laptop through SSH,
-without exposing them beyond `127.0.0.1`.
+> Remote development services that still feel like `localhost`.
+
+![OmaTunnel panel preview](preview.png)
+
+OmaTunnel is an Omarchy Quickshell bar widget and SSH-forward manager. It
+makes selected development-server ports available through `localhost`, without
+exposing them beyond `127.0.0.1`.
+
+The preview uses example routes only; it contains no real hostname, account, or
+connection data.
+
+## What it gives you
+
+- **Local services always win.** A genuine listener is never replaced.
+- **Manual mappings.** Explicitly map a local port to an SSH destination and
+  remote host.
+- **Optional all-localhost mode.** Use eBPF to route eligible missing localhost
+  ports from browsers, `curl`, database clients, and development tools.
+- **Visible state.** See active manual tunnels and automatic routes opened in
+  the current service session.
+
+## Choose a mode
+
+| Mode | Best for | Privileges |
+| --- | --- | --- |
+| Manual tunnels | A known set of development ports | User-level only |
+| On-demand forwarding | Any eligible missing localhost port | Optional `sudo` setup for eBPF |
 
 ## How it behaves
 
