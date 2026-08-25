@@ -4,10 +4,11 @@
   "name": "OmaTunnel",
   "version": "0.1.0",
   "author": "Jeroen van Baarsen",
+  "license": "MIT",
   "description": "Expose configured development services over safe, local-only SSH forwards.",
   "kinds": ["bar-widget"],
   "entryPoints": {
-    "barWidget": "Panel.qml"
+    "barWidget": "BarWidget.qml"
   },
   "barWidget": {
     "displayName": "OmaTunnel",

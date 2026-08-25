@@ -39,16 +39,24 @@ OmaTunnel owns for that local port.
 
 ## Install
 
-From this directory:
+Install the bar widget from its public repository:
 
 ```bash
+omarchy plugin add https://github.com/<owner>/omatunnel.git --enable
+```
+
+The widget requires the accompanying helper and user service. Run its installer
+once from the installed plugin directory:
+
+```bash
+cd ~/.config/omarchy/plugins/jvb.omatunnel
 ./install
 ```
 
-The installer copies the user helper and systemd unit, creates a private
-configuration file only if it does not already exist, links the QuickShell
-plugin, starts the user service, and enables the OmaTunnel icon in the
-**top-right** of the Omarchy bar. Edit the example mapping before using it:
+The installer copies the user helper and systemd unit, creates private
+configuration files only if they do not already exist, starts the user service,
+and enables the widget in the **top-right** of the Omarchy bar. Edit the
+example mapping before using it:
 
 ```bash
 $EDITOR ~/.config/omatunnel/ports.tsv
@@ -60,6 +68,9 @@ If you ever disable the widget, restore it to the top-right with:
 ```bash
 omarchy plugin enable jvb.omatunnel right
 ```
+
+OmaTunnel does not start another QuickShell process. Its bar-widget entry point
+loads the panel in the existing Omarchy shell.
 
 ## Useful commands
 
@@ -83,6 +94,7 @@ limited list or range of remote ports in `~/.config/omatunnel/on-demand.conf`,
 then enable it:
 
 ```bash
+cd ~/.config/omarchy/plugins/jvb.omatunnel
 ./install --on-demand
 ```
 
@@ -120,3 +132,33 @@ Inspect its status with:
 sudo systemctl status "omatunnel-ebpf@$USER.service"
 journalctl -u "omatunnel-ebpf@$USER.service" -f
 ```
+
+## Remove
+
+From the installed plugin directory, remove the user-level helper and service:
+
+```bash
+./uninstall
+omarchy plugin remove jvb.omatunnel
+```
+
+If you enabled system-wide on-demand forwarding, remove its privileged system
+service first:
+
+```bash
+./uninstall --on-demand
+omarchy plugin remove jvb.omatunnel
+```
+
+Removal preserves `~/.config/omatunnel/` so manually entered tunnel settings
+are not lost. Remove that directory yourself only when you explicitly want to
+discard your configuration.
+
+## Security and dependencies
+
+The widget runs in Omarchy's existing shell process with your user permissions.
+The helper invokes only `ssh`, `ss`, `systemctl`, and standard shell utilities.
+The optional on-demand mode additionally requires `clang`, `libbpf`, and sudo
+because it loads an eBPF program with the limited capabilities documented
+above. No credentials, SSH keys, or remote endpoints are stored in this
+repository.

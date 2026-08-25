@@ -15,7 +15,15 @@ install -Dm644 "$source_dir/systemd/omatunnel.service" "$unit_dir/omatunnel.serv
 mkdir -p "$config_dir"
 if [[ ! -e "$config_dir/ports.tsv" ]]; then install -Dm600 "$source_dir/examples/ports.tsv" "$config_dir/ports.tsv"; fi
 if [[ ! -e "$config_dir/on-demand.conf" ]]; then install -Dm600 "$source_dir/examples/on-demand.conf" "$config_dir/on-demand.conf"; fi
-ln -sfn "$source_dir/plugin" "$plugin_dir"
+[[ -d "$plugin_dir" && ! -L "$plugin_dir" ]] || {
+  echo "Install the widget first with: omarchy plugin add <repository-url> --enable" >&2
+  echo "Then run this script from $plugin_dir." >&2
+  exit 1
+}
+[[ "$(readlink -f "$plugin_dir")" == "$source_dir" ]] || {
+  echo "Run this installer from the installed plugin directory: $plugin_dir" >&2
+  exit 1
+}
 
 systemctl --user daemon-reload
 systemctl --user enable --now omatunnel.service

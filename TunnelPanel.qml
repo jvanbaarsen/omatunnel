@@ -9,6 +9,7 @@ Panel {
   manageIpc: false
 
   property var anchorItem: null
+  property var hostWidget: null
   property alias service: serviceImpl
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.45)
@@ -50,6 +51,14 @@ Panel {
   function open() {
     controller.show()
     service.refresh()
+  }
+
+  function close() { controller.hide() }
+
+  function switchPanel(direction) {
+    if (bar && typeof bar.switchPanelFrom === "function")
+      return bar.switchPanelFrom(hostWidget || root, direction)
+    return false
   }
 
   function toggle() {
