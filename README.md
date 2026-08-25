@@ -8,9 +8,6 @@ OmaTunnel is an Omarchy Quickshell bar widget and SSH-forward manager. It
 makes selected development-server ports available through `localhost`, without
 exposing them beyond `127.0.0.1`.
 
-The preview uses example routes only; it contains no real hostname, account, or
-connection data.
-
 ## What it gives you
 
 - **Local services always win.** A genuine listener is never replaced.
