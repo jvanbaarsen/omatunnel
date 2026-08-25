@@ -125,8 +125,10 @@ destination must work with `BatchMode=yes` (normally an `IdentityFile` entry in
 `~/.ssh/config` or an available unencrypted default key).
 
 The installer builds the BPF program and uses `sudo` to enable a system service
-with only `CAP_BPF`, `CAP_NET_ADMIN`, and `CAP_PERFMON`. SSH and the proxy run
-as your own user. At each eligible `connect(2)` call, the BPF program looks up
+with only `CAP_BPF`, `CAP_NET_ADMIN`, and `CAP_PERFMON`. The loader retains
+those capabilities only for its BPF work; every `ssh` child clears them before
+reading your SSH configuration (including any `ProxyCommand`). SSH and the
+proxy run as your own user. At each eligible `connect(2)` call, the BPF program looks up
 the requested localhost TCP listener first. It leaves an existing listener
 untouched; otherwise it redirects the connection to OmaTunnel's proxy, which
 uses `ssh -W` to reach the same port on the configured remote host.
@@ -181,5 +183,6 @@ The widget runs in Omarchy's existing shell process with your user permissions.
 The helper invokes only `ssh`, `ss`, `systemctl`, and standard shell utilities.
 The optional on-demand mode additionally requires `clang`, `libbpf`, and sudo
 because it loads an eBPF program with the limited capabilities documented
-above. No credentials, SSH keys, or remote endpoints are stored in this
-repository.
+above. During privileged installation, source files are supplied on stdin so
+`sudo` never reopens user-writable checkout paths. No credentials, SSH keys,
+or remote endpoints are stored in this repository.

@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/bpf.h>
+#include <linux/capability.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -14,6 +15,8 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
+#include <sys/prctl.h>
+#include <sys/syscall.h>
 #include <pthread.h>
 #include <poll.h>
 #include <sys/stat.h>
@@ -113,6 +116,25 @@ static void write_all(int destination, const char *buffer, size_t length) {
   while (length) { ssize_t written = write(destination, buffer, length); if (written <= 0) return; buffer += written; length -= (size_t)written; }
 }
 
+/*
+ * The loader needs BPF capabilities for the lifetime of the proxy: it reads
+ * and deletes entries from the BPF maps while handling connections.  OpenSSH
+ * does not.  In particular, OpenSSH may run a user-controlled ProxyCommand,
+ * so make every SSH child entirely unprivileged before it can consult SSH
+ * configuration.
+ */
+static void drop_capabilities_for_ssh(void) {
+  struct __user_cap_header_struct header = { .version = _LINUX_CAPABILITY_VERSION_3, .pid = 0 };
+  struct __user_cap_data_struct data[2] = {};
+
+  if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) ||
+      prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0) ||
+      syscall(SYS_capset, &header, &data)) {
+    perror("[DEBUG-omatunnel-handoff] cannot drop SSH child capabilities");
+    _exit(126);
+  }
+}
+
 struct copy_context { int source; int destination; };
 static void *copy_stream(void *argument) {
   struct copy_context *context = argument; char buffer[65536]; ssize_t read_count;
@@ -135,6 +157,7 @@ static void *handle_client(void *argument) {
   if (!child) {
     dup2(to_child[0], STDIN_FILENO); dup2(from_child[1], STDOUT_FILENO);
     close(to_child[1]); close(from_child[0]);
+    drop_capabilities_for_ssh();
     execlp("ssh", "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ConnectionAttempts=1", "-W", target, context->settings.ssh_destination, (char *)NULL);
     perror("[DEBUG-omatunnel-handoff] ssh exec failed");
     _exit(127);

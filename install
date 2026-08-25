@@ -10,6 +10,14 @@ enable_on_demand="${1:-}"
 
 [[ -z "$enable_on_demand" || "$enable_on_demand" == "--on-demand" ]] || { echo "usage: ./install [--on-demand]" >&2; exit 1; }
 
+# The plugin checkout is user-writable.  Feed each reviewed artifact to the
+# privileged installer over stdin, so sudo never resolves or reopens a
+# mutable checkout path after the privilege boundary.
+install_privileged_file() {
+  local mode="$1" source="$2" destination="$3"
+  sudo install -Dm"$mode" /dev/stdin "$destination" < "$source"
+}
+
 install -Dm755 "$source_dir/bin/omatunnel" "$bin_dir/omatunnel"
 install -Dm644 "$source_dir/systemd/omatunnel.service" "$unit_dir/omatunnel.service"
 mkdir -p "$config_dir"
@@ -29,11 +37,11 @@ systemctl --user daemon-reload
 systemctl --user enable --now omatunnel.service
 if [[ "$enable_on_demand" == "--on-demand" ]]; then
   make -C "$source_dir" ebpf-check
-  sudo install -Dm755 "$source_dir/ebpf/omatunnel-ebpf" /usr/local/lib/omatunnel/omatunnel-ebpf
-  sudo install -Dm644 "$source_dir/ebpf/omatunnel-connect.bpf.o" /usr/local/lib/omatunnel/omatunnel-connect.bpf.o
-  sudo install -Dm644 "$source_dir/systemd/omatunnel-ebpf@.service" /etc/systemd/system/omatunnel-ebpf@.service
-  sudo install -Dm644 "$source_dir/systemd/omatunnel-ebpf-reload@.service" /etc/systemd/system/omatunnel-ebpf-reload@.service
-  sudo install -Dm644 "$source_dir/systemd/omatunnel-ebpf-reload@.path" /etc/systemd/system/omatunnel-ebpf-reload@.path
+  install_privileged_file 755 "$source_dir/ebpf/omatunnel-ebpf" /usr/local/lib/omatunnel/omatunnel-ebpf
+  install_privileged_file 644 "$source_dir/ebpf/omatunnel-connect.bpf.o" /usr/local/lib/omatunnel/omatunnel-connect.bpf.o
+  install_privileged_file 644 "$source_dir/systemd/omatunnel-ebpf@.service" /etc/systemd/system/omatunnel-ebpf@.service
+  install_privileged_file 644 "$source_dir/systemd/omatunnel-ebpf-reload@.service" /etc/systemd/system/omatunnel-ebpf-reload@.service
+  install_privileged_file 644 "$source_dir/systemd/omatunnel-ebpf-reload@.path" /etc/systemd/system/omatunnel-ebpf-reload@.path
   sudo systemctl daemon-reload
   sudo systemctl enable "omatunnel-ebpf-reload@${USER}.path"
   sudo systemctl restart "omatunnel-ebpf-reload@${USER}.path"
